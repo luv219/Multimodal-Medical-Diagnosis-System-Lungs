@@ -180,3 +180,5 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 .claude/worktrees/amazing-merkle-5628d0/
+
+data/NIH Dataset/
