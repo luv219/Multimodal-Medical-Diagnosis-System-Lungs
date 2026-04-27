@@ -4,7 +4,8 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(chmod +x run.sh)",
-      "Bash(python -c \" import os for root, dirs, files in os.walk\\('data'\\): depth = root.replace\\('data', ''\\).count\\(os.sep\\) if depth > 2: break indent = ' ' * depth print\\(f'{indent}{os.path.basename\\(root\\)}/'\\) if depth == 2: print\\(f'{indent} [{len\\(files\\)} files]'\\) \")"
+      "Bash(python -c \" import os for root, dirs, files in os.walk\\('data'\\): depth = root.replace\\('data', ''\\).count\\(os.sep\\) if depth > 2: break indent = ' ' * depth print\\(f'{indent}{os.path.basename\\(root\\)}/'\\) if depth == 2: print\\(f'{indent} [{len\\(files\\)} files]'\\) \")",
+      "Bash(python -c ' *)"
     ]
   }
 }
