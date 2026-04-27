@@ -7,7 +7,6 @@ Ablation loss         : FocalLoss (standard sigmoid focal loss; uses AdamW in tr
 from __future__ import annotations
 
 import functools
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -28,50 +27,44 @@ class AUCMLoss(nn.Module):
 
     Workflow
     --------
-    1. Instantiate (no imratio needed at construction time).
+    1. Instantiate (imratio not needed at construction time).
     2. Call ``update_imratio(dataset.class_weights)`` once the dataset is
        loaded so the internal loss uses real per-class positive rates.
-    3. Build a PESG optimizer via ``get_optimizer`` — it reads ``self.aucm_loss``
-       directly to obtain the margin-variable tensors (a, b, alpha).
+    3. Build a PESG optimizer via ``get_optimizer`` — pass ``self.aucm_loss``
+       as ``loss_fn`` so PESG can read its internal margin variables.
 
     Attributes
     ----------
     aucm_loss : MultiLabelAUCMLoss
-        Exposed so that the PESG optimizer can access ``.a``, ``.b``,
-        ``.alpha`` directly.
+        Exposed so that ``get_optimizer`` can pass it directly to PESG.
+    epoch_decay : float
+        Fixed decay rate forwarded to PESG (0.002 per libauc defaults).
     """
 
     def __init__(
         self,
         num_classes: int = 14,
         margin: float = 1.0,
-        epoch_decay: float = 2e-3,
-        gamma: float = 500,
     ) -> None:
         super().__init__()
 
-        self.num_classes = num_classes
-        self.margin      = margin
-        self.epoch_decay = epoch_decay
-        self.gamma       = gamma
+        self.num_classes  = num_classes
+        self.margin       = margin
+        self.epoch_decay  = 0.002          # PESG still needs this; fixed per libauc defaults
 
         self.aucm_loss = MultiLabelAUCMLoss(
-            num_labels=num_classes,
             margin=margin,
-            epoch_decay=epoch_decay,
-            gamma=gamma,
+            num_labels=num_classes,
+            version='v1',
         )
 
     # ------------------------------------------------------------------
     def update_imratio(self, class_weights_tensor: torch.Tensor) -> None:
-        """Reinitialise the internal AUCM loss with real per-class positive rates.
+        """Reinitialise the internal loss with real per-class positive rates.
 
         Converts NIHChestDataset.class_weights (neg/pos ratios) to imratio:
 
             imratio_i = 1 / (1 + class_weight_i)  =  pos_i / (pos_i + neg_i)
-
-        The internal AUCM_MultiLabel is rebuilt so that the margin-variable
-        tensors (a, b, alpha) are initialised correctly before PESG is created.
 
         Args:
             class_weights_tensor: 1-D float tensor, shape (num_classes,),
@@ -79,11 +72,10 @@ class AUCMLoss(nn.Module):
         """
         imratio_list = (1.0 / (1.0 + class_weights_tensor.float())).tolist()
         self.aucm_loss = MultiLabelAUCMLoss(
-            imratio=imratio_list,
-            num_labels=self.num_classes,
             margin=self.margin,
-            epoch_decay=self.epoch_decay,
-            gamma=self.gamma,
+            num_labels=self.num_classes,
+            version='v1',
+            imratio=imratio_list,
         )
 
     # ------------------------------------------------------------------
@@ -132,36 +124,28 @@ class FocalLoss(nn.Module):
 # ---------------------------------------------------------------------------
 
 def get_optimizer(model: nn.Module, loss: AUCMLoss, config=_default_config) -> PESG:
-    """Return a PESG optimizer configured for AUCM_MultiLabel training.
+    """Return a PESG optimizer configured for MultiLabelAUCMLoss training.
 
-    Call *after* ``loss.update_imratio()`` so that ``loss.aucm_loss.a``,
-    ``.b``, and ``.alpha`` reflect the real class imbalance.
+    Call *after* ``loss.update_imratio()`` so that the internal loss has
+    been initialised with real class imbalance before PESG is created.
 
     Args:
         model:  The network whose parameters PESG will update.
-        loss:   An AUCMLoss instance (exposes ``.aucm_loss`` for PESG).
+        loss:   An AUCMLoss instance (exposes ``.aucm_loss`` as loss_fn).
         config: Config module; reads ``TRAINING["learning_rate"]`` and
                 ``TRAINING["weight_decay"]``.
 
     Returns:
         Configured PESG optimizer.
     """
-    lr           = config.TRAINING["learning_rate"]
-    weight_decay = config.TRAINING["weight_decay"]
-    device       = "cuda" if torch.cuda.is_available() else "cpu"
-
     return PESG(
-        model,
-        a=loss.aucm_loss.a,
-        b=loss.aucm_loss.b,
-        alpha=loss.aucm_loss.alpha,
-        lr=lr,
-        gamma=loss.gamma,
-        margin=loss.margin,
+        model.parameters(),
+        loss_fn=loss.aucm_loss,
+        lr=config.TRAINING["learning_rate"],
+        weight_decay=config.TRAINING["weight_decay"],
         epoch_decay=loss.epoch_decay,
-        weight_decay=weight_decay,
         momentum=0.9,
-        device=device,
+        device=next(model.parameters()).device,
     )
 
 
@@ -246,7 +230,7 @@ if __name__ == "__main__":
 
     fake_weights = torch.rand(C) * 9.0 + 1.0       # simulated neg/pos ratios in [1, 10]
     aucm_loss.update_imratio(fake_weights)
-    print(f"  loss (after update_imratio): {aucm_loss(logits, labels).item():.6f}")
+    print(f"  loss (after update_imratio) : {aucm_loss(logits, labels).item():.6f}")
 
     # ---- FocalLoss --------------------------------------------------------
     print("\n[FocalLoss]")
