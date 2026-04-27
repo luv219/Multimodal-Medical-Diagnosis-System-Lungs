@@ -230,12 +230,14 @@ def get_dataloaders(cfg=config) -> dict[str, DataLoader]:
             transform=get_transforms(split, cfg),
             cfg=cfg,
         )
+        # pin_memory is disabled for test: single sequential pass, compute-bound not
+        # transfer-bound, and pin_memory can conflict with CUDA state post-training.
         loaders[split] = DataLoader(
             ds,
             batch_size=cfg.TRAINING["batch_size"],
             shuffle=(split == "train"),
             num_workers=nworkers,
-            pin_memory=pin,
+            pin_memory=(pin and split != "test"),
             # Keeps worker processes alive between epochs (avoids per-epoch spawn cost).
             persistent_workers=(nworkers > 0),
             # Pre-fetch next batch while GPU processes the current one.

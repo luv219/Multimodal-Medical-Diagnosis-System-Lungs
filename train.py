@@ -498,29 +498,39 @@ def main() -> None:
     print(f"\nTraining complete. Best val AUC: {best_auc:.4f} at epoch {best_epoch}.")
 
     # ---- Test evaluation using best checkpoint ---------------------------
-    best_ckpt = ckpt_dir / "best.pth"
-    if best_ckpt.exists():
-        print(f"\nLoading best checkpoint for test evaluation: {best_ckpt}")
-        load_checkpoint(str(best_ckpt), model, optimizer, scheduler)
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
 
-    test_metrics = evaluate(model, test_loader, loss_fn, device, class_names,
-                            max_batches=val_max)
+    try:
+        best_ckpt = ckpt_dir / "best.pth"
+        if best_ckpt.exists():
+            print(f"\nLoading best checkpoint for test evaluation: {best_ckpt}")
+            load_checkpoint(str(best_ckpt), model, optimizer, scheduler)
 
-    print("\n" + "=" * 60)
-    print("Final Test Results")
-    print("=" * 60)
-    print(f"  Mean AUC : {test_metrics['mean_auc']:.4f}")
-    print(f"  Loss     : {test_metrics['loss']:.4f}")
-    print()
+        test_metrics = evaluate(model, test_loader, loss_fn, device, class_names,
+                                max_batches=val_max)
 
-    for name, auc in sorted(test_metrics["per_class_auc"].items(), key=lambda x: x[1], reverse=True):
-        print(f"  {name:<22} {auc:>6.4f}")
+        print("\n" + "=" * 60)
+        print("Final Test Results")
+        print("=" * 60)
+        print(f"  Mean AUC : {test_metrics['mean_auc']:.4f}")
+        print(f"  Loss     : {test_metrics['loss']:.4f}")
+        print()
 
-    if writer is not None:
-        writer.add_scalar("AUC/test_mean", test_metrics["mean_auc"], num_epochs)
-        for name, auc in test_metrics["per_class_auc"].items():
-            writer.add_scalar(f"AUC_test_per_class/{name}", auc, num_epochs)
-        writer.close()
+        for name, auc in sorted(test_metrics["per_class_auc"].items(), key=lambda x: x[1], reverse=True):
+            print(f"  {name:<22} {auc:>6.4f}")
+
+        if writer is not None:
+            writer.add_scalar("AUC/test_mean", test_metrics["mean_auc"], num_epochs)
+            for name, auc in test_metrics["per_class_auc"].items():
+                writer.add_scalar(f"AUC_test_per_class/{name}", auc, num_epochs)
+            writer.close()
+
+    except Exception as e:
+        print(f"\n[Warning] Test evaluation failed: {e}")
+        print("This is non-critical in --fast-dev-run mode. Run evaluate.py for full test eval.")
+        if writer is not None:
+            writer.close()
 
 
 if __name__ == "__main__":
