@@ -208,6 +208,9 @@ def train_one_epoch(
             else:
                 optimizer.step()
 
+        if is_cuda and batch_idx % 50 == 0:
+            torch.cuda.empty_cache()
+
         batch_loss   = loss.item() * grad_accum_steps   # restore for display
         total_loss  += batch_loss
         num_batches += 1
@@ -436,6 +439,9 @@ def main() -> None:
         val_auc  = val_metrics["mean_auc"]
 
         scheduler.step()
+
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
         # TensorBoard logging
         if writer is not None:

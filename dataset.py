@@ -220,8 +220,8 @@ def get_dataloaders(cfg=config) -> dict[str, DataLoader]:
     Returns:
         dict with keys "train", "val", "test".
     """
-    pin       = torch.cuda.is_available()
-    nworkers  = cfg.DATASET["num_workers"]
+    pin      = torch.cuda.is_available()
+    nworkers = cfg.DATASET.get("num_workers", 0)
     loaders: dict[str, DataLoader] = {}
 
     for split in ("train", "val", "test"):
@@ -232,17 +232,19 @@ def get_dataloaders(cfg=config) -> dict[str, DataLoader]:
         )
         # pin_memory is disabled for test: single sequential pass, compute-bound not
         # transfer-bound, and pin_memory can conflict with CUDA state post-training.
-        loaders[split] = DataLoader(
-            ds,
+        loader_kwargs: dict = dict(
             batch_size=cfg.TRAINING["batch_size"],
             shuffle=(split == "train"),
-            num_workers=nworkers,
             pin_memory=(pin and split != "test"),
-            # Keeps worker processes alive between epochs (avoids per-epoch spawn cost).
-            persistent_workers=(nworkers > 0),
-            # Pre-fetch next batch while GPU processes the current one.
-            prefetch_factor=2 if nworkers > 0 else None,
         )
+        if nworkers > 0:
+            # persistent_workers and prefetch_factor are invalid with num_workers=0.
+            loader_kwargs.update(
+                num_workers=nworkers,
+                persistent_workers=True,
+                prefetch_factor=2,
+            )
+        loaders[split] = DataLoader(ds, **loader_kwargs)
 
     return loaders
 

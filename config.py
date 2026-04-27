@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 # ── Data root ────────────────────────────────────────────────────────────────
 # Override by setting NIH_DATA_ROOT environment variable
 DATA_ROOT = Path(os.environ.get("NIH_DATA_ROOT", "data/NIH Dataset"))
@@ -24,7 +26,7 @@ PATHS = {
 # ── Dataset ───────────────────────────────────────────────────────────────────
 DATASET = {
     "image_size": 224,
-    "num_workers": 2,
+    "num_workers": 0,
     "num_classes": 14,
     "class_names": [
         "Atelectasis", "Cardiomegaly", "Effusion", "Infiltration",
@@ -36,15 +38,15 @@ DATASET = {
 
 # ── Training ──────────────────────────────────────────────────────────────────
 TRAINING = {
-    "batch_size":              64,
+    "batch_size":              32,
     "learning_rate":           1e-4,
     "weight_decay":            1e-5,
     "num_epochs":              50,
     "early_stopping_patience": 7,
     "seed":                    42,
-    "grad_accum_steps":        2,
+    "grad_accum_steps":        4,
     "mixed_precision":         True,
-    "num_workers":             2,
+    "num_workers":             0,
 }
 
 # ── Model ─────────────────────────────────────────────────────────────────────
