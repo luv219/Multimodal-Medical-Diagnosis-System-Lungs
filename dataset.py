@@ -220,7 +220,8 @@ def get_dataloaders(cfg=config) -> dict[str, DataLoader]:
     Returns:
         dict with keys "train", "val", "test".
     """
-    pin = torch.cuda.is_available()
+    pin       = torch.cuda.is_available()
+    nworkers  = cfg.DATASET["num_workers"]
     loaders: dict[str, DataLoader] = {}
 
     for split in ("train", "val", "test"):
@@ -233,8 +234,12 @@ def get_dataloaders(cfg=config) -> dict[str, DataLoader]:
             ds,
             batch_size=cfg.TRAINING["batch_size"],
             shuffle=(split == "train"),
-            num_workers=cfg.DATASET["num_workers"],
+            num_workers=nworkers,
             pin_memory=pin,
+            # Keeps worker processes alive between epochs (avoids per-epoch spawn cost).
+            persistent_workers=(nworkers > 0),
+            # Pre-fetch next batch while GPU processes the current one.
+            prefetch_factor=2 if nworkers > 0 else None,
         )
 
     return loaders

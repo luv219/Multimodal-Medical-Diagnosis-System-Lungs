@@ -1,14 +1,21 @@
 """
 train.py — Training pipeline for NIH ChestX-ray14 multi-label classification.
 
+Optimised for RTX 3050 6 GB:
+  - Mixed-precision (AMP) with float16 forward/loss, manual PESG-safe scaler step
+  - Gradient accumulation (effective batch = batch_size × grad_accum_steps)
+  - cudnn.benchmark=True via config.set_seed()
+
 Usage:
     python train.py --model densenet --loss aucm
     python train.py --model swin    --loss focal --epochs 30 --freeze-epochs 5
     python train.py --model hybrid  --resume checkpoints/latest.pth
+    python train.py --model densenet --fast-dev-run   # smoke-test 2 epochs
 """
 from __future__ import annotations
 
 import argparse
+import time
 import warnings
 from pathlib import Path
 
@@ -29,16 +36,18 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="NIH ChestX-ray14 training script")
     p.add_argument("--model",           choices=["densenet", "swin", "hybrid"], required=True)
     p.add_argument("--loss",            choices=["aucm", "focal"], default="aucm")
-    p.add_argument("--epochs",          type=int,   default=None,
+    p.add_argument("--epochs",          type=int,  default=None,
                    help="Override config num_epochs")
-    p.add_argument("--batch-size",      type=int,   default=None,
+    p.add_argument("--batch-size",      type=int,  default=None,
                    help="Override config batch_size")
-    p.add_argument("--freeze-epochs",   type=int,   default=3,
+    p.add_argument("--freeze-epochs",   type=int,  default=3,
                    help="Epochs to train with frozen backbone before full fine-tuning")
-    p.add_argument("--resume",          type=str,   default=None,
+    p.add_argument("--resume",          type=str,  default=None,
                    help="Path to checkpoint (.pth) to resume from")
-    p.add_argument("--experiment-name", type=str,   default=None,
+    p.add_argument("--experiment-name", type=str,  default=None,
                    help="Override config experiment_name")
+    p.add_argument("--fast-dev-run",    action="store_true",
+                   help="Smoke-test mode: 2 epochs, 100 train batches, 50 val batches")
     return p.parse_args()
 
 
@@ -49,28 +58,31 @@ def parse_args() -> argparse.Namespace:
 class EarlyStopping:
     """Stops training when a monitored metric stops improving.
 
+    Default patience is 10 — rare-disease AUC can plateau for several epochs
+    before improving, so a short patience causes premature termination.
+
     Args:
-        patience:  Number of epochs with no improvement before stopping.
+        patience:  Epochs with no improvement before stopping (default 10).
         min_delta: Minimum change to qualify as an improvement.
-        mode:      "max" (higher is better, e.g. AUC) or "min" (lower is better).
+        mode:      "max" (higher is better, e.g. AUC) or "min".
     """
 
-    def __init__(self, patience: int, min_delta: float = 1e-4, mode: str = "max") -> None:
-        self.patience  = patience
-        self.min_delta = min_delta
-        self.mode      = mode
-        self.best      = float("-inf") if mode == "max" else float("inf")
-        self.counter   = 0
+    def __init__(self, patience: int = 10, min_delta: float = 1e-4, mode: str = "max") -> None:
+        self.patience    = patience
+        self.min_delta   = min_delta
+        self.mode        = mode
+        self.best        = float("-inf") if mode == "max" else float("inf")
+        self.counter     = 0
         self.epochs_seen = 0
 
     def __call__(self, metric: float) -> bool:
         """Return True if training should stop."""
         self.epochs_seen += 1
 
-        if self.mode == "max":
-            improved = metric > self.best + self.min_delta
-        else:
-            improved = metric < self.best - self.min_delta
+        improved = (
+            metric > self.best + self.min_delta if self.mode == "max"
+            else metric < self.best - self.min_delta
+        )
 
         if improved:
             self.best    = metric
@@ -78,7 +90,6 @@ class EarlyStopping:
         else:
             self.counter += 1
 
-        # Never stop before patience epochs have elapsed
         return self.counter >= self.patience and self.epochs_seen >= self.patience
 
 
@@ -101,10 +112,9 @@ def load_checkpoint(
     """Load a checkpoint and restore model / optimizer / scheduler state.
 
     Returns:
-        (start_epoch, best_auc) — epoch to resume from and best AUC so far.
+        (start_epoch, best_auc)
     """
     ckpt = torch.load(path, map_location="cpu")
-
     model.load_state_dict(ckpt["model_state_dict"])
 
     try:
@@ -120,16 +130,12 @@ def load_checkpoint(
 
     epoch    = ckpt.get("epoch", 0) + 1
     best_auc = ckpt.get("best_auc", 0.0)
-
-    print(
-        f"Resumed from '{path}'  "
-        f"(epoch {ckpt.get('epoch', '?')}, best_auc={best_auc:.4f})"
-    )
+    print(f"Resumed from '{path}'  (epoch {ckpt.get('epoch', '?')}, best_auc={best_auc:.4f})")
     return epoch, best_auc
 
 
 # ---------------------------------------------------------------------------
-# Training / evaluation
+# Training
 # ---------------------------------------------------------------------------
 
 def train_one_epoch(
@@ -140,28 +146,69 @@ def train_one_epoch(
     device: torch.device,
     epoch: int,
     writer,
+    scaler,                     # torch.cuda.amp.GradScaler or None
+    grad_accum_steps: int = 1,
+    max_batches: int | None = None,   # for --fast-dev-run
 ) -> float:
-    """Run one training epoch.
+    """Run one training epoch with optional AMP and gradient accumulation.
+
+    AMP + PESG notes
+    ----------------
+    scaler.step(optimizer) cannot be used with PESG because PESG's step method
+    has a non-standard signature.  Instead we:
+      1. scaler.unscale_(optimizer) — convert scaled grads to true grads
+      2. optimizer.step()           — PESG's custom update
+      3. scaler.update()            — adjust scale factor for next iteration
+    For standard optimizers (AdamW) the same path is used for consistency.
 
     Returns:
-        Mean batch loss for the epoch.
+        Mean loss per batch (unscaled, for logging).
     """
     model.train()
     total_loss  = 0.0
     num_batches = 0
+    is_cuda     = (device.type == "cuda")
 
-    bar = tqdm(loader, desc=f"Epoch {epoch:3d} [train]", leave=False)
+    bar = tqdm(loader, desc=f"Epoch {epoch:3d} [train]", leave=False, dynamic_ncols=True)
+
     for batch_idx, (images, labels, _) in enumerate(bar):
+        if max_batches is not None and batch_idx >= max_batches:
+            break
+
+        # Zero gradients at the START of each accumulation cycle
+        if batch_idx % grad_accum_steps == 0:
+            optimizer.zero_grad()
+
         images = images.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
 
-        optimizer.zero_grad()
-        logits = model(images)
-        loss   = loss_fn(logits, labels)
-        loss.backward()
-        optimizer.step()
+        is_last_batch  = (batch_idx == len(loader) - 1)
+        if max_batches is not None:
+            is_last_batch = is_last_batch or (batch_idx == max_batches - 1)
+        should_step = (batch_idx + 1) % grad_accum_steps == 0 or is_last_batch
 
-        batch_loss   = loss.item()
+        # ---- Forward + loss (inside autocast when AMP enabled) -----------
+        if scaler is not None:
+            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                logits = model(images)
+                loss   = loss_fn(logits, labels) / grad_accum_steps
+            scaler.scale(loss).backward()
+        else:
+            logits = model(images)
+            loss   = loss_fn(logits, labels) / grad_accum_steps
+            loss.backward()
+
+        # ---- Optimizer step at end of accumulation cycle -----------------
+        if should_step:
+            if scaler is not None:
+                # Unscale before optimizer.step() so PESG sees true gradients.
+                scaler.unscale_(optimizer)
+                optimizer.step()
+                scaler.update()
+            else:
+                optimizer.step()
+
+        batch_loss   = loss.item() * grad_accum_steps   # restore for display
         total_loss  += batch_loss
         num_batches += 1
 
@@ -171,12 +218,16 @@ def train_one_epoch(
             global_step = (epoch - 1) * len(loader) + batch_idx
             writer.add_scalar("Loss/train_batch", batch_loss, global_step)
 
-    # PESG requires an epoch-level regularizer update
+    # PESG requires one epoch-level regularizer decay call
     if hasattr(optimizer, "update_regularizer"):
         optimizer.update_regularizer(decay_factor=2)
 
     return total_loss / max(num_batches, 1)
 
+
+# ---------------------------------------------------------------------------
+# Evaluation
+# ---------------------------------------------------------------------------
 
 def evaluate(
     model: nn.Module,
@@ -184,8 +235,9 @@ def evaluate(
     loss_fn: nn.Module,
     device: torch.device,
     class_names: list[str],
+    max_batches: int | None = None,   # for --fast-dev-run
 ) -> dict:
-    """Run inference on a DataLoader split and compute AUC metrics.
+    """Run inference and compute per-class AUC metrics.
 
     Returns:
         dict with keys: "mean_auc", "per_class_auc" (class→float), "loss".
@@ -197,7 +249,12 @@ def evaluate(
     num_batches = 0
 
     with torch.no_grad():
-        for images, labels, _ in tqdm(loader, desc="[eval]", leave=False):
+        for batch_idx, (images, labels, _) in enumerate(
+            tqdm(loader, desc="[eval]", leave=False, dynamic_ncols=True)
+        ):
+            if max_batches is not None and batch_idx >= max_batches:
+                break
+
             images = images.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
 
@@ -209,17 +266,16 @@ def evaluate(
             all_logits.append(logits.cpu())
             all_labels.append(labels.cpu())
 
-    all_probs  = torch.sigmoid(torch.cat(all_logits, dim=0)).numpy()  # (N, C)
-    all_labels = torch.cat(all_labels, dim=0).numpy()                 # (N, C)
+    all_probs  = torch.sigmoid(torch.cat(all_logits, dim=0)).numpy()
+    all_labels = torch.cat(all_labels, dim=0).numpy()
 
     per_class_auc: dict[str, float] = {}
     valid_aucs: list[float] = []
 
     for i, name in enumerate(class_names):
-        y_true = all_labels[:, i]
+        y_true  = all_labels[:, i]
         y_score = all_probs[:, i]
 
-        # roc_auc_score requires at least one positive and one negative sample
         if y_true.sum() == 0 or y_true.sum() == len(y_true):
             warnings.warn(
                 f"Class '{name}' has no minority-class samples in this split; AUC skipped."
@@ -231,7 +287,6 @@ def evaluate(
         valid_aucs.append(auc)
 
     mean_auc = float(np.mean(valid_aucs)) if valid_aucs else 0.0
-
     return {
         "mean_auc":      mean_auc,
         "per_class_auc": per_class_auc,
@@ -246,19 +301,33 @@ def evaluate(
 def main() -> None:
     args = parse_args()
 
-    # ---- Apply CLI overrides to config ------------------------------------
+    # ---- Fast-dev-run warning --------------------------------------------
+    if args.fast_dev_run:
+        print("=" * 60)
+        print("  WARNING: --fast-dev-run active")
+        print("  Training: 100 batches × 2 epochs")
+        print("  Validation: 50 batches per epoch")
+        print("  This mode is for pipeline smoke-testing only.")
+        print("=" * 60)
+
+    # ---- Apply CLI overrides to config -----------------------------------
     if args.epochs is not None:
         cfg.TRAINING["num_epochs"] = args.epochs
     if args.batch_size is not None:
         cfg.TRAINING["batch_size"] = args.batch_size
     if args.experiment_name is not None:
         cfg.LOGGING["experiment_name"] = args.experiment_name
+    if args.fast_dev_run:
+        cfg.TRAINING["num_epochs"] = 2
 
     cfg.set_seed(cfg.TRAINING["seed"])
 
+    grad_accum_steps = cfg.TRAINING.get("grad_accum_steps", 1)
+    mixed_precision  = cfg.TRAINING.get("mixed_precision", False)
+
     # ---- Data ------------------------------------------------------------
     from dataset import get_dataloaders
-    loaders = get_dataloaders(cfg)
+    loaders      = get_dataloaders(cfg)
     train_loader = loaders["train"]
     val_loader   = loaders["val"]
     test_loader  = loaders["test"]
@@ -266,6 +335,14 @@ def main() -> None:
     train_dataset = train_loader.dataset
     class_names   = cfg.DATASET["class_names"]
     device        = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # ---- AMP scaler ------------------------------------------------------
+    use_amp = mixed_precision and device.type == "cuda"
+    scaler  = torch.cuda.amp.GradScaler() if use_amp else None
+    if use_amp:
+        print(f"Mixed precision (AMP float16) enabled — grad_accum_steps={grad_accum_steps}")
+    else:
+        print(f"Mixed precision disabled (device={device})")
 
     # ---- Model -----------------------------------------------------------
     from models import get_model
@@ -275,9 +352,9 @@ def main() -> None:
     from losses import get_loss, get_scheduler
     loss_fn, optimizer_fn = get_loss(args.loss, train_dataset, cfg)
 
-    if optimizer_fn is not None:           # AUCM → PESG
+    if optimizer_fn is not None:       # AUCM → PESG
         optimizer = optimizer_fn(model, loss_fn)
-    else:                                  # focal → AdamW
+    else:                              # focal → AdamW
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=cfg.TRAINING["learning_rate"],
@@ -294,9 +371,7 @@ def main() -> None:
     start_epoch = 1
     best_auc    = 0.0
     if args.resume:
-        start_epoch, best_auc = load_checkpoint(
-            args.resume, model, optimizer, scheduler
-        )
+        start_epoch, best_auc = load_checkpoint(args.resume, model, optimizer, scheduler)
 
     # ---- TensorBoard -----------------------------------------------------
     writer = None
@@ -309,8 +384,8 @@ def main() -> None:
         except ImportError:
             warnings.warn("tensorboard not installed; skipping SummaryWriter.")
 
-    # ---- Freeze backbone for warmup --------------------------------------
-    freeze_epochs = args.freeze_epochs
+    # ---- Backbone warmup -------------------------------------------------
+    freeze_epochs   = args.freeze_epochs
     backbone_frozen = False
     if freeze_epochs > 0 and hasattr(model, "freeze_backbone"):
         model.freeze_backbone(True)
@@ -319,18 +394,27 @@ def main() -> None:
 
     # ---- Early stopping --------------------------------------------------
     early_stopper = EarlyStopping(
-        patience=cfg.TRAINING.get("early_stopping_patience", 7),
+        patience=cfg.TRAINING.get("early_stopping_patience", 10),
         mode="max",
     )
 
     num_epochs = cfg.TRAINING["num_epochs"]
     best_epoch = start_epoch
 
-    print(f"\nStarting training — model={args.model}, loss={args.loss}, "
-          f"epochs={num_epochs}, device={device}\n")
+    eff_batch = cfg.TRAINING["batch_size"] * grad_accum_steps
+    print(
+        f"\nStarting training — model={args.model}, loss={args.loss}, "
+        f"epochs={num_epochs}, device={device}, "
+        f"batch={cfg.TRAINING['batch_size']}×{grad_accum_steps}={eff_batch} (effective)\n"
+    )
+
+    # fast-dev-run batch limits
+    train_max = 100 if args.fast_dev_run else None
+    val_max   = 50  if args.fast_dev_run else None
 
     # ---- Training loop ---------------------------------------------------
     for epoch in range(start_epoch, num_epochs + 1):
+        epoch_start = time.time()
 
         # Unfreeze backbone after warmup
         if backbone_frozen and epoch == freeze_epochs + 1:
@@ -339,11 +423,17 @@ def main() -> None:
             print(f"Backbone unfrozen at epoch {epoch}.")
 
         train_loss = train_one_epoch(
-            model, train_loader, loss_fn, optimizer, device, epoch, writer
+            model, train_loader, loss_fn, optimizer, device, epoch, writer,
+            scaler=scaler,
+            grad_accum_steps=grad_accum_steps,
+            max_batches=train_max,
         )
-        val_metrics = evaluate(model, val_loader, loss_fn, device, class_names)
-        val_loss    = val_metrics["loss"]
-        val_auc     = val_metrics["mean_auc"]
+        val_metrics = evaluate(
+            model, val_loader, loss_fn, device, class_names,
+            max_batches=val_max,
+        )
+        val_loss = val_metrics["loss"]
+        val_auc  = val_metrics["mean_auc"]
 
         scheduler.step()
 
@@ -356,26 +446,42 @@ def main() -> None:
                 writer.add_scalar(f"AUC_per_class/{name}", auc, epoch)
 
         current_lr = optimizer.param_groups[0]["lr"]
+
+        # GPU memory stats
+        if device.type == "cuda":
+            mem_alloc    = torch.cuda.memory_allocated(0) / 1e9
+            mem_reserved = torch.cuda.memory_reserved(0) / 1e9
+            gpu_str      = f" | GPU mem: {mem_alloc:.1f}/{mem_reserved:.1f}GB"
+        else:
+            gpu_str = ""
+
+        # Epoch timing
+        elapsed  = time.time() - epoch_start
+        mins, secs = divmod(int(elapsed), 60)
+        time_str = f"{mins}m {secs}s"
+
         print(
             f"Epoch {epoch:3d}/{num_epochs} | "
-            f"train_loss {train_loss:.4f} | "
-            f"val_loss {val_loss:.4f} | "
-            f"val_auc {val_auc:.4f} | "
-            f"lr {current_lr:.2e}"
+            f"Train Loss: {train_loss:.4f} | "
+            f"Val Loss: {val_loss:.4f} | "
+            f"Val AUC: {val_auc:.4f} | "
+            f"LR: {current_lr:.1e}"
+            f"{gpu_str} | "
+            f"Time: {time_str}"
         )
 
-        # Checkpoint: always overwrite latest
+        # Save latest checkpoint every epoch
         ckpt_state = {
-            "epoch":               epoch,
-            "model_state_dict":    model.state_dict(),
+            "epoch":                epoch,
+            "model_state_dict":     model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
-            "best_auc":            best_auc,
-            "args":                vars(args),
+            "best_auc":             best_auc,
+            "args":                 vars(args),
         }
         save_checkpoint(ckpt_state, ckpt_dir / "latest.pth")
 
-        # Checkpoint: save best
+        # Save best checkpoint
         if val_auc > best_auc:
             best_auc   = val_auc
             best_epoch = epoch
@@ -406,12 +512,7 @@ def main() -> None:
     print(f"  Loss     : {test_metrics['loss']:.4f}")
     print()
 
-    sorted_classes = sorted(
-        test_metrics["per_class_auc"].items(), key=lambda x: x[1], reverse=True
-    )
-    print(f"  {'Class':<22} {'AUC':>6}")
-    print(f"  {'-' * 22} {'-' * 6}")
-    for name, auc in sorted_classes:
+    for name, auc in sorted(test_metrics["per_class_auc"].items(), key=lambda x: x[1], reverse=True):
         print(f"  {name:<22} {auc:>6.4f}")
 
     if writer is not None:

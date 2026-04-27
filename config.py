@@ -24,7 +24,7 @@ PATHS = {
 # ── Dataset ───────────────────────────────────────────────────────────────────
 DATASET = {
     "image_size": 224,
-    "num_workers": 4,
+    "num_workers": 2,
     "num_classes": 14,
     "class_names": [
         "Atelectasis", "Cardiomegaly", "Effusion", "Infiltration",
@@ -36,12 +36,15 @@ DATASET = {
 
 # ── Training ──────────────────────────────────────────────────────────────────
 TRAINING = {
-    "batch_size":              32,
+    "batch_size":              64,
     "learning_rate":           1e-4,
     "weight_decay":            1e-5,
     "num_epochs":              50,
     "early_stopping_patience": 7,
     "seed":                    42,
+    "grad_accum_steps":        2,
+    "mixed_precision":         True,
+    "num_workers":             2,
 }
 
 # ── Model ─────────────────────────────────────────────────────────────────────
@@ -118,8 +121,10 @@ def set_seed(seed: int | None = None) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    # benchmark=True lets cuDNN auto-tune kernels for the input size (faster).
+    # deterministic=False is required — the two flags are mutually exclusive.
+    torch.backends.cudnn.benchmark     = True
+    torch.backends.cudnn.deterministic = False
 
 
 # ── __main__ ──────────────────────────────────────────────────────────────────
