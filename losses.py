@@ -1,19 +1,19 @@
 """
 losses.py — Loss functions and optimizer/scheduler factories for NIH ChestX-ray14.
 
-Primary training loss : AUCMLoss  (wraps libauc AUCM_MultiLabel + PESG).
+Primary training loss : AUCMLoss  (wraps libauc MultiLabelAUCMLoss + PESG).
 Ablation loss         : FocalLoss (standard sigmoid focal loss; uses AdamW in train.py).
 """
 from __future__ import annotations
 
 import functools
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from libauc.losses import AUCM_MultiLabel
+from libauc.losses import MultiLabelAUCMLoss
 from libauc.optimizers import PESG
 
 import config as _default_config
@@ -24,11 +24,11 @@ import config as _default_config
 # ---------------------------------------------------------------------------
 
 class AUCMLoss(nn.Module):
-    """Wraps libauc AUCM_MultiLabel for multi-label AUC-margin optimisation.
+    """Wraps libauc MultiLabelAUCMLoss for multi-label AUC-margin optimisation.
 
     Workflow
     --------
-    1. Instantiate with placeholder imratio (or a known estimate).
+    1. Instantiate (no imratio needed at construction time).
     2. Call ``update_imratio(dataset.class_weights)`` once the dataset is
        loaded so the internal loss uses real per-class positive rates.
     3. Build a PESG optimizer via ``get_optimizer`` — it reads ``self.aucm_loss``
@@ -36,7 +36,7 @@ class AUCMLoss(nn.Module):
 
     Attributes
     ----------
-    aucm_loss : AUCM_MultiLabel
+    aucm_loss : MultiLabelAUCMLoss
         Exposed so that the PESG optimizer can access ``.a``, ``.b``,
         ``.alpha`` directly.
     """
@@ -47,7 +47,6 @@ class AUCMLoss(nn.Module):
         margin: float = 1.0,
         epoch_decay: float = 2e-3,
         gamma: float = 500,
-        imratio: Optional[Union[list, torch.Tensor]] = None,
     ) -> None:
         super().__init__()
 
@@ -56,15 +55,8 @@ class AUCMLoss(nn.Module):
         self.epoch_decay = epoch_decay
         self.gamma       = gamma
 
-        if imratio is None:
-            # Uniform placeholder; overwrite with update_imratio() before training.
-            imratio = [0.1] * num_classes
-        elif isinstance(imratio, torch.Tensor):
-            imratio = imratio.tolist()
-
-        self.aucm_loss = AUCM_MultiLabel(
-            imratio=imratio,
-            num_classes=num_classes,
+        self.aucm_loss = MultiLabelAUCMLoss(
+            num_labels=num_classes,
             margin=margin,
             epoch_decay=epoch_decay,
             gamma=gamma,
@@ -85,10 +77,10 @@ class AUCMLoss(nn.Module):
             class_weights_tensor: 1-D float tensor, shape (num_classes,),
                 where entry i is neg_count_i / pos_count_i.
         """
-        imratio = (1.0 / (1.0 + class_weights_tensor.float())).tolist()
-        self.aucm_loss = AUCM_MultiLabel(
-            imratio=imratio,
-            num_classes=self.num_classes,
+        imratio_list = (1.0 / (1.0 + class_weights_tensor.float())).tolist()
+        self.aucm_loss = MultiLabelAUCMLoss(
+            imratio=imratio_list,
+            num_labels=self.num_classes,
             margin=self.margin,
             epoch_decay=self.epoch_decay,
             gamma=self.gamma,
@@ -250,7 +242,7 @@ if __name__ == "__main__":
     # ---- AUCMLoss ---------------------------------------------------------
     print("\n[AUCMLoss]")
     aucm_loss = AUCMLoss(num_classes=C)
-    print(f"  loss (placeholder imratio) : {aucm_loss(logits, labels).item():.6f}")
+    print(f"  loss (before update_imratio): {aucm_loss(logits, labels).item():.6f}")
 
     fake_weights = torch.rand(C) * 9.0 + 1.0       # simulated neg/pos ratios in [1, 10]
     aucm_loss.update_imratio(fake_weights)

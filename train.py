@@ -146,7 +146,7 @@ def train_one_epoch(
     device: torch.device,
     epoch: int,
     writer,
-    scaler,                     # torch.cuda.amp.GradScaler or None
+    scaler,                     # torch.amp.GradScaler or None
     grad_accum_steps: int = 1,
     max_batches: int | None = None,   # for --fast-dev-run
 ) -> float:
@@ -338,7 +338,7 @@ def main() -> None:
 
     # ---- AMP scaler ------------------------------------------------------
     use_amp = mixed_precision and device.type == "cuda"
-    scaler  = torch.cuda.amp.GradScaler() if use_amp else None
+    scaler  = torch.amp.GradScaler("cuda") if use_amp else None
     if use_amp:
         print(f"Mixed precision (AMP float16) enabled — grad_accum_steps={grad_accum_steps}")
     else:
