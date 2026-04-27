@@ -114,7 +114,7 @@ def load_checkpoint(
     Returns:
         (start_epoch, best_auc)
     """
-    ckpt = torch.load(path, map_location="cpu")
+    ckpt = torch.load(path, map_location="cpu", weights_only=False)
     model.load_state_dict(ckpt["model_state_dict"])
 
     try:
@@ -503,7 +503,8 @@ def main() -> None:
         print(f"\nLoading best checkpoint for test evaluation: {best_ckpt}")
         load_checkpoint(str(best_ckpt), model, optimizer, scheduler)
 
-    test_metrics = evaluate(model, test_loader, loss_fn, device, class_names)
+    test_metrics = evaluate(model, test_loader, loss_fn, device, class_names,
+                            max_batches=val_max)
 
     print("\n" + "=" * 60)
     print("Final Test Results")
