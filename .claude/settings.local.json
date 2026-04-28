@@ -10,7 +10,8 @@
       "Bash(py -c \"from libauc.losses import MultiLabelAUCMLoss; print\\('MultiLabelAUCMLoss ok'\\)\")",
       "Bash(py -c \"import libauc; print\\('libauc version:', libauc.__version__\\)\")",
       "Bash(git commit *)",
-      "Bash(py train.py --model densenet --loss aucm --freeze-epochs 3 --fast-dev-run)"
+      "Bash(py train.py --model densenet --loss aucm --freeze-epochs 3 --fast-dev-run)",
+      "Bash(grep -n \"TBD\\\\|includegraphics\\\\|label{fig\\\\|Macro F1\\\\|approx.*7,122\\\\|0\\\\.1366\\\\|0\\\\.1384\\\\|0\\\\.1355\" \"E:\\\\Major Project\\\\Multimodal-Medical-Diagnosis-System-Lungs\\\\IEEE Report\\\\IEEE-conference-template-062824.tex\")"
     ]
   }
 }

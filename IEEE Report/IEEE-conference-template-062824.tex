@@ -281,27 +281,28 @@ parameters per class.
 
 \begin{table}[!t]
 \renewcommand{\arraystretch}{1.2}
-\caption{Class Distribution and Positive Class Ratio -- Training Split}
+\caption{Class Distribution and Positive Class Ratio -- Training Split
+(69,087 images; counts estimated from NIH dataset proportions~\cite{wang2017})}
 \label{tab:class_dist}
 \centering
 \begin{tabular}{lcc}
 \toprule
 \textbf{Disease Class} & \textbf{Train Count} & \textbf{Pos.\ Ratio} \\
 \midrule
-Atelectasis         & \textit{[TBD]} & \textit{[TBD]} \\
-Cardiomegaly        & \textit{[TBD]} & \textit{[TBD]} \\
-Effusion            & \textit{[TBD]} & \textit{[TBD]} \\
-Infiltration        & \textit{[TBD]} & \textit{[TBD]} \\
-Mass                & \textit{[TBD]} & \textit{[TBD]} \\
-Nodule              & \textit{[TBD]} & \textit{[TBD]} \\
-Pneumonia           & \textit{[TBD]} & \textit{[TBD]} \\
-Pneumothorax        & \textit{[TBD]} & \textit{[TBD]} \\
-Consolidation       & \textit{[TBD]} & \textit{[TBD]} \\
-Edema               & \textit{[TBD]} & \textit{[TBD]} \\
-Emphysema           & \textit{[TBD]} & \textit{[TBD]} \\
-Fibrosis            & \textit{[TBD]} & \textit{[TBD]} \\
-Pleural\_Thickening & \textit{[TBD]} & \textit{[TBD]} \\
-Hernia              & \textit{[TBD]} & \textit{[TBD]} \\
+Atelectasis         & $\approx$7,122  & 0.1031 \\
+Cardiomegaly        & $\approx$1,706  & 0.0247 \\
+Effusion            & $\approx$8,207  & 0.1188 \\
+Infiltration        & $\approx$12,254 & 0.1774 \\
+Mass                & $\approx$3,565  & 0.0516 \\
+Nodule              & $\approx$3,897  & 0.0564 \\
+Pneumonia           & $\approx$884    & 0.0128 \\
+Pneumothorax        & $\approx$3,268  & 0.0473 \\
+Consolidation       & $\approx$2,874  & 0.0416 \\
+Edema               & $\approx$1,416  & 0.0205 \\
+Emphysema           & $\approx$1,548  & 0.0224 \\
+Fibrosis            & $\approx$1,036  & 0.0150 \\
+Pleural\_Thickening & $\approx$2,086  & 0.0302 \\
+Hernia              & $\approx$138    & 0.0020 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -421,6 +422,18 @@ logits. The GradCAM++ target is \texttt{cnn\_backbone.layer4}; its
 4D output (B,~2048,~7,~7) passes through the reshape transform
 unchanged since it already satisfies the spatial format requirement.
 
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{cnn_te_architecture.png}
+\caption{CNN-TE hybrid architecture. ResNet-50 \texttt{layer4} produces a
+(B,~2048,~7,~7) feature map; a 1$\times$1 convolution projects it to
+(B,~256,~7,~7); spatial dimensions are flattened to 49 tokens; learnable
+positional encoding is added; two Transformer encoder layers with 8 heads
+attend over all 49 spatial tokens; global average pooling and a
+LayerNorm-Linear head produce 14 output logits.}
+\label{fig:cnn_te}
+\end{figure}
+
 \subsection{Loss Function and Optimiser}
 
 All three architectures are trained with
@@ -483,6 +496,20 @@ a single forward pass do not accumulate stale gradient references. The
 top-$k$ predicted classes by sigmoid probability are selected for
 visualisation, and saliency maps are overlaid on denormalised images
 using \texttt{show\_cam\_on\_image} from \texttt{pytorch\_grad\_cam.utils.image}.
+Fig.~\ref{fig:gradcam} shows representative GradCAM++ saliency overlays
+across all three architectures on test-set radiographs.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{../results/gramCAMResult/gradcams.png}
+\caption{GradCAM++ saliency maps for DenseNet-121, Swin-Tiny, and CNN-TE
+on representative test-set chest radiographs. Warmer colours indicate
+regions most influential for the top-predicted disease class.
+Architecture-specific reshape transforms convert Transformer sequence
+tensors (B,~49,~C) to the 2D spatial format (B,~C,~7,~7) required by
+the gradient accumulation mechanism before upsampling to 224$\times$224.}
+\label{fig:gradcam}
+\end{figure}
 
 \section{Results and Discussion}
 
@@ -526,10 +553,20 @@ Hernia              & 0.6609 & 0.4595 & 0.3652 \\
 \end{tabular}
 \end{table}
 
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{../results/dashboard.png}
+\caption{Multi-model comparison dashboard. \textit{Top-left}: per-class
+AUC-ROC heatmap (14 diseases $\times$ 3 models). \textit{Top-right}: per-class
+F1 heatmap. \textit{Bottom-left}: macro AUC bar chart with per-disease line
+overlay. \textit{Bottom-right}: best-model summary table per disease class.}
+\label{fig:dashboard}
+\end{figure}
+
 \subsection{Summary Metrics and Efficiency}
 
 Table~\ref{tab:summary} compares the three architectures across macro
-AUC, weighted F1 score, parameter count, and inference throughput
+AUC, macro F1 score, parameter count, and inference throughput
 measured on the same RTX~3050 hardware with batch size 32.
 
 \begin{table}[!t]
@@ -539,12 +576,12 @@ measured on the same RTX~3050 hardware with batch size 32.
 \centering
 \begin{tabular}{lcccc}
 \toprule
-\textbf{Model} & \textbf{mAUC} & \textbf{wF1} &
+\textbf{Model} & \textbf{mAUC} & \textbf{Macro F1} &
 \textbf{Params} & \textbf{Img/s} \\
 \midrule
-DenseNet-121  & \textbf{0.5085} & \textit{[TBD]} & $\sim$7M  & \textit{[TBD]} \\
-Swin-Tiny     & 0.5044          & \textit{[TBD]} & $\sim$28M & \textit{[TBD]} \\
-CNN-TE (ours) & 0.4756          & \textit{[TBD]} & $\sim$27M & \textit{[TBD]} \\
+DenseNet-121  & \textbf{0.5085} & 0.1366 & $\sim$7M  & \textit{[TBD]} \\
+Swin-Tiny     & 0.5044          & \textbf{0.1384} & $\sim$28M & \textit{[TBD]} \\
+CNN-TE (ours) & 0.4756          & 0.1355 & $\sim$27M & \textit{[TBD]} \\
 \bottomrule
 \end{tabular}
 \end{table}
