@@ -159,7 +159,7 @@ def plot_auc_heatmap(
         np.where(
             nan_mask,
             "N/A",
-            df.applymap(lambda v: f"{v:.3f}" if pd.notna(v) else "N/A"),
+            df.map(lambda v: f"{v:.3f}" if pd.notna(v) else "N/A"),
         ),
         index=df.index,
         columns=df.columns,
