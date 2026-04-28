@@ -183,3 +183,4 @@ cython_debug/
 
 data/NIH Dataset/
 /checkpoints
+*.pth
