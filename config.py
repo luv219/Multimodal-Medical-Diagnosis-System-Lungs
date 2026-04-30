@@ -38,22 +38,25 @@ DATASET = {
 
 # ── Training ──────────────────────────────────────────────────────────────────
 TRAINING = {
-    "batch_size":              32,
-    "learning_rate":           1e-4,
+    "batch_size":              16,
+    "learning_rate":           7e-5,
     "weight_decay":            1e-5,
-    "num_epochs":              5,
-    "early_stopping_patience": 2,
+    "num_epochs":              50,
+    "early_stopping_patience": 10,
     "seed":                    42,
-    "grad_accum_steps":        4,
+    "grad_accum_steps":        8,
     "mixed_precision":         True,
     "num_workers":             0,
+    "warmup_epochs":           5,
+    "label_smoothing":         0.1,
+    "ema_decay":               0.999,
 }
 
 # ── Model ─────────────────────────────────────────────────────────────────────
 MODEL = {
     "image_mean":                [0.485, 0.456, 0.406],
     "image_std":                 [0.229, 0.224, 0.225],
-    "dropout_rate":              0.0,
+    "dropout_rate":              0.2,
     "swin_model_name":           "swin_tiny_patch4_window7_224",
     "hybrid_transformer_layers": 2,
     "hybrid_transformer_dim":    256,
