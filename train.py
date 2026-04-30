@@ -208,7 +208,7 @@ def train_one_epoch(
             else:
                 optimizer.step()
 
-        if is_cuda and batch_idx % 50 == 0:
+        if is_cuda and batch_idx % 20 == 0:
             torch.cuda.empty_cache()
 
         batch_loss   = loss.item() * grad_accum_steps   # restore for display
@@ -350,6 +350,10 @@ def main() -> None:
     # ---- Model -----------------------------------------------------------
     from models import get_model
     model = get_model(args.model, cfg)
+
+    # Memory optimisation for low-VRAM systems
+    if torch.cuda.is_available():
+        torch.cuda.set_per_process_memory_fraction(0.85)
 
     # ---- Loss + optimizer ------------------------------------------------
     from losses import get_loss, get_scheduler
