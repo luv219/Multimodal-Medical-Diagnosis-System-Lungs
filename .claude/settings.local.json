@@ -11,7 +11,14 @@
       "Bash(py -c \"import libauc; print\\('libauc version:', libauc.__version__\\)\")",
       "Bash(git commit *)",
       "Bash(py train.py --model densenet --loss aucm --freeze-epochs 3 --fast-dev-run)",
-      "Bash(grep -n \"TBD\\\\|includegraphics\\\\|label{fig\\\\|Macro F1\\\\|approx.*7,122\\\\|0\\\\.1366\\\\|0\\\\.1384\\\\|0\\\\.1355\" \"E:\\\\Major Project\\\\Multimodal-Medical-Diagnosis-System-Lungs\\\\IEEE Report\\\\IEEE-conference-template-062824.tex\")"
+      "Bash(grep -n \"TBD\\\\|includegraphics\\\\|label{fig\\\\|Macro F1\\\\|approx.*7,122\\\\|0\\\\.1366\\\\|0\\\\.1384\\\\|0\\\\.1355\" \"E:\\\\Major Project\\\\Multimodal-Medical-Diagnosis-System-Lungs\\\\IEEE Report\\\\IEEE-conference-template-062824.tex\")",
+      "Read(//c/Users/luvvg/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/996cf368-6677-404c-947a-b892233d39af/0129d30f-04af-470a-a640-3e5ccfcb3141/skills/docx/**)",
+      "Bash(python scripts/office/unpack.py \"E:\\\\Major Project\\\\Multimodal-Medical-Diagnosis-System-Lungs\\\\Docuements\\\\MajorProject_46_47.docx\" unpacked/)",
+      "Bash(py scripts/office/unpack.py \"E:\\\\Major Project\\\\Multimodal-Medical-Diagnosis-System-Lungs\\\\Docuements\\\\MajorProject_46_47.docx\" unpacked/)",
+      "Bash(py -c ' *)",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -c \"print\\('hello'\\)\")",
+      "Bash(py -c \"print\\('hello'\\)\")"
     ]
   }
 }
