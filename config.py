@@ -39,7 +39,7 @@ DATASET = {
 # ── Training ──────────────────────────────────────────────────────────────────
 TRAINING = {
     "batch_size":              16,
-    "learning_rate":           7e-5,
+    "learning_rate":           1e-4,
     "weight_decay":            1e-5,
     "num_epochs":              50,
     "early_stopping_patience": 10,
@@ -47,9 +47,6 @@ TRAINING = {
     "grad_accum_steps":        8,
     "mixed_precision":         True,
     "num_workers":             0,
-    "warmup_epochs":           5,
-    "label_smoothing":         0.1,
-    "ema_decay":               0.999,
 }
 
 # ── Model ─────────────────────────────────────────────────────────────────────

@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -163,6 +164,7 @@ def visualize_cam(
     cam_map: np.ndarray,
     class_name: str,
     predicted_prob: float,
+    model_name: str = "",
     save_path: str | None = None,
 ) -> None:
     """Create and display / save a three-panel GradCAM++ figure.
@@ -182,8 +184,12 @@ def visualize_cam(
     overlay = show_cam_on_image(original_image_np, cam_map, use_rgb=True)
 
     fig, axes = plt.subplots(1, 3, figsize=(14, 5))
+    try:
+        fig.canvas.manager.set_window_title(f"GradCAM++ — {model_name.upper()}")
+    except AttributeError:
+        pass
     fig.suptitle(
-        f"{class_name} — predicted prob: {predicted_prob:.3f}",
+        f"GradCAM++ | {model_name.upper()} | {class_name}",
         fontsize=14,
         fontweight="bold",
     )
@@ -280,18 +286,20 @@ def explain_sample(
     )
 
     # ---- GradCAM++ -------------------------------------------------------
+    os.makedirs("results", exist_ok=True)
     with get_cam_extractor(model, model_name) as cam_extractor:
         for class_idx in explain_indices:
-            cam_map  = generate_cam(model, cam_extractor, image_tensor, class_idx)
+            cam_map    = generate_cam(model, cam_extractor, image_tensor, class_idx)
             class_name = class_names[class_idx]
             prob       = float(probs_np[class_idx])
 
             save_path = None
             if save_dir is not None:
                 safe_name = class_name.replace(" ", "_").replace("/", "-")
-                save_path = str(Path(save_dir) / f"{image_stem}_{safe_name}.png")
+                save_path = str(Path("results") / f"gradcam_{model_name}_{safe_name}.png")
 
-            visualize_cam(original_np, cam_map, class_name, prob, save_path=save_path)
+            visualize_cam(original_np, cam_map, class_name, prob,
+                          model_name=model_name, save_path=save_path)
 
             if save_path:
                 print(f"  Saved: {save_path}")
