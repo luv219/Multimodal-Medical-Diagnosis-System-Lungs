@@ -359,8 +359,15 @@ def main() -> None:
     from losses import get_loss, get_scheduler
     loss_fn, optimizer_fn = get_loss(args.loss, train_dataset, cfg)
 
+    _num_epochs = cfg.TRAINING["num_epochs"]
+    total_steps = len(train_loader) * _num_epochs
+
     if optimizer_fn is not None:       # AUCM → PESG
-        optimizer = optimizer_fn(model, loss_fn)
+        print(
+            f"PESG T (total steps) = {len(train_loader)} batches/epoch "
+            f"× {_num_epochs} epochs = {total_steps}"
+        )
+        optimizer = optimizer_fn(model, loss_fn, total_steps=total_steps)
     else:                              # focal → AdamW
         optimizer = torch.optim.AdamW(
             model.parameters(),

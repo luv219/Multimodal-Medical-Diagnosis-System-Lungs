@@ -50,7 +50,7 @@ class AUCMLoss(nn.Module):
 
         self.num_classes  = num_classes
         self.margin       = margin
-        self.epoch_decay  = 0.002          # PESG still needs this; fixed per libauc defaults
+        self.epoch_decay  = 0.003          # slower decay — 0.002 decays LR too aggressively
 
         self.aucm_loss = MultiLabelAUCMLoss(
             margin=margin,
@@ -123,23 +123,31 @@ class FocalLoss(nn.Module):
 # Optimizer / scheduler factories
 # ---------------------------------------------------------------------------
 
-def get_optimizer(model: nn.Module, loss: AUCMLoss, config=_default_config) -> PESG:
+def get_optimizer(
+    model: nn.Module,
+    loss: AUCMLoss,
+    config=_default_config,
+    total_steps: int | None = None,
+) -> PESG:
     """Return a PESG optimizer configured for MultiLabelAUCMLoss training.
 
     Call *after* ``loss.update_imratio()`` so that the internal loss has
     been initialised with real class imbalance before PESG is created.
 
     Args:
-        model:  The network whose parameters PESG will update.
-        loss:   An AUCMLoss instance (exposes ``.aucm_loss`` as loss_fn).
-        config: Config module; reads ``TRAINING["learning_rate"]`` and
-                ``TRAINING["weight_decay"]``.
+        model:        The network whose parameters PESG will update.
+        loss:         An AUCMLoss instance (exposes ``.aucm_loss`` as loss_fn).
+        config:       Config module; reads ``TRAINING["learning_rate"]`` and
+                      ``TRAINING["weight_decay"]``.
+        total_steps:  Total number of optimizer steps across all epochs
+                      (``len(train_loader) * num_epochs``).  Passed as ``T``
+                      to PESG so its cosine LR schedule spans the full run
+                      rather than a single epoch.
 
     Returns:
         Configured PESG optimizer.
     """
-    return PESG(
-        model.parameters(),
+    pesg_kwargs: dict = dict(
         loss_fn=loss.aucm_loss,
         lr=config.TRAINING["learning_rate"],
         weight_decay=config.TRAINING["weight_decay"],
@@ -147,6 +155,9 @@ def get_optimizer(model: nn.Module, loss: AUCMLoss, config=_default_config) -> P
         momentum=0.9,
         device=next(model.parameters()).device,
     )
+    if total_steps is not None:
+        pesg_kwargs["T"] = total_steps
+    return PESG(model.parameters(), **pesg_kwargs)
 
 
 def get_scheduler(optimizer, config=_default_config) -> CosineAnnealingLR:
