@@ -80,7 +80,7 @@ def _patient_id(filename: str) -> str:
 def _train_val_split(
     filenames: list[str],
     val_fraction: float = 0.2,
-    seed: int = config.TRAINING["seed"],
+    seed: int = int(config.TRAINING["seed"]),
 ) -> tuple[list[str], list[str]]:
     """Patient-level 80/20 split — no patient appears in both train and val.
 

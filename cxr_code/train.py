@@ -15,9 +15,9 @@ import warnings
 import json
 from torch.optim import lr_scheduler
 from torch.autograd import Variable
-from densenet import densenet121
+from .densenet import densenet121
 
-import util
+from . import util
 
 
 class DenseNet(nn.Module):
