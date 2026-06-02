@@ -11,12 +11,12 @@ import json
 import argparse
 import itertools
 from sklearn import metrics
-import util
-from train import transform_data, DenseNet
+from . import util
+from .train import transform_data, DenseNet
 from joblib import Memory
 
 
-memory = Memory(cachedir='./cache', verbose=0)
+memory = Memory(location='./cache', verbose=0)
 
 
 # convert dictionary to object

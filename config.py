@@ -11,8 +11,9 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 # Override by setting NIH_DATA_ROOT environment variable
 DATA_ROOT = Path(os.environ.get("NIH_DATA_ROOT", "data/NIH Dataset"))
 
+from typing import Any
 # ── Paths ─────────────────────────────────────────────────────────────────────
-PATHS = {
+PATHS: dict[str, Any] = {
     "data_root":   DATA_ROOT,
     "images_dirs": [DATA_ROOT / f"images_{i:03d}" / "images" for i in range(1, 13)],
     "labels_csv":  DATA_ROOT / "Data_Entry_2017.csv",
@@ -24,7 +25,7 @@ PATHS = {
 }
 
 # ── Dataset ───────────────────────────────────────────────────────────────────
-DATASET = {
+DATASET: dict[str, Any] = {
     "image_size": 224,
     "num_workers": 0,
     "num_classes": 14,
@@ -37,7 +38,7 @@ DATASET = {
 }
 
 # ── Training ──────────────────────────────────────────────────────────────────
-TRAINING = {
+TRAINING: dict[str, Any] = {
     "batch_size":              16,
     "learning_rate":           1e-4,
     "weight_decay":            1e-5,
@@ -50,7 +51,7 @@ TRAINING = {
 }
 
 # ── Model ─────────────────────────────────────────────────────────────────────
-MODEL = {
+MODEL: dict[str, Any] = {
     "image_mean":                [0.485, 0.456, 0.406],
     "image_std":                 [0.229, 0.224, 0.225],
     "dropout_rate":              0.2,
@@ -61,7 +62,7 @@ MODEL = {
 }
 
 # ── Logging ───────────────────────────────────────────────────────────────────
-LOGGING = {
+LOGGING: dict[str, Any] = {
     "use_tensorboard":  True,
     "use_wandb":        False,
     "experiment_name":  "nih_chestxray_comparison",
@@ -117,7 +118,7 @@ def validate_paths() -> bool:
 def set_seed(seed: int | None = None) -> None:
     """Seed random, numpy, and torch for reproducibility."""
     if seed is None:
-        seed = TRAINING["seed"]
+        seed = int(TRAINING["seed"])
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)

@@ -85,7 +85,7 @@ def draw_display(dispsize, imagefile=None):
         # (do not do so on Windows, as the image appears to be loaded with
         # the correct side up there; what's up with that? :/)
         if not os.name == 'nt':
-            img = numpy.flipud(img)
+            img = np.flipud(img)
         # width and height of the image
         w, h = len(img[0]), len(img)
         # x and y position of the image on the display

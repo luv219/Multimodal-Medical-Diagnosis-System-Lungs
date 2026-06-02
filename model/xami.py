@@ -1,7 +1,5 @@
 # design the Fully Connected layer to process
 from collections import OrderedDict
-from msilib.schema import Error
-from turtle import forward
 import torch
 import torch.nn as nn
 import numpy as np
@@ -162,7 +160,7 @@ class FusionLayer(nn.Module):
         elif self.fuse_type == "concat":
             return torch.cat((x, y), dim=-1)
         else:
-            raise Error("Not supported fusion type")
+            raise ValueError("Not supported fusion type")
 
 
 class AddFusionLayer(nn.Module):
@@ -340,7 +338,7 @@ class XAMIMultiCocatModal(nn.Module):
             clinical_out = self.clinical_net(clincal_data)
             fused_representation = clinical_out
         else:
-            raise Error("Not modality is included.")
+            raise ValueError("Not modality is included.")
 
         decision_out = self.decision_net(fused_representation)
         return decision_out

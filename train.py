@@ -269,15 +269,15 @@ def evaluate(
             all_logits.append(logits.cpu())
             all_labels.append(labels.cpu())
 
-    all_probs  = torch.sigmoid(torch.cat(all_logits, dim=0)).numpy()
-    all_labels = torch.cat(all_labels, dim=0).numpy()
+    all_probs_np = torch.sigmoid(torch.cat(all_logits, dim=0)).numpy()
+    all_labels_np = torch.cat(all_labels, dim=0).numpy()
 
     per_class_auc: dict[str, float] = {}
     valid_aucs: list[float] = []
 
     for i, name in enumerate(class_names):
-        y_true  = all_labels[:, i]
-        y_score = all_probs[:, i]
+        y_true = all_labels_np[:, i]
+        y_score = all_probs_np[:, i]
 
         if y_true.sum() == 0 or y_true.sum() == len(y_true):
             warnings.warn(
@@ -323,9 +323,9 @@ def main() -> None:
     if args.fast_dev_run:
         cfg.TRAINING["num_epochs"] = 2
 
-    cfg.set_seed(cfg.TRAINING["seed"])
+    cfg.set_seed(int(cfg.TRAINING["seed"]))
 
-    grad_accum_steps = cfg.TRAINING.get("grad_accum_steps", 1)
+    grad_accum_steps = int(cfg.TRAINING.get("grad_accum_steps", 1))
     mixed_precision  = cfg.TRAINING.get("mixed_precision", False)
 
     # ---- Data ------------------------------------------------------------
@@ -336,7 +336,7 @@ def main() -> None:
     test_loader  = loaders["test"]
 
     train_dataset = train_loader.dataset
-    class_names   = cfg.DATASET["class_names"]
+    class_names: list[str] = cfg.DATASET["class_names"]
     device        = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # ---- AMP scaler ------------------------------------------------------
@@ -359,7 +359,7 @@ def main() -> None:
     from losses import get_loss, get_scheduler
     loss_fn, optimizer_fn = get_loss(args.loss, train_dataset, cfg)
 
-    _num_epochs = cfg.TRAINING["num_epochs"]
+    _num_epochs = int(cfg.TRAINING["num_epochs"])
     total_steps = len(train_loader) * _num_epochs
 
     if optimizer_fn is not None:       # AUCM → PESG
@@ -392,7 +392,7 @@ def main() -> None:
     if cfg.LOGGING.get("use_tensorboard", False):
         try:
             from torch.utils.tensorboard import SummaryWriter
-            log_dir = Path(cfg.PATHS["logs"]) / cfg.LOGGING["experiment_name"] / args.model
+            log_dir = Path(str(cfg.PATHS["logs"])) / str(cfg.LOGGING["experiment_name"]) / str(args.model)
             writer  = SummaryWriter(log_dir=str(log_dir))
             print(f"TensorBoard logs → {log_dir}")
         except ImportError:
@@ -408,14 +408,14 @@ def main() -> None:
 
     # ---- Early stopping --------------------------------------------------
     early_stopper = EarlyStopping(
-        patience=cfg.TRAINING.get("early_stopping_patience", 10),
+        patience=int(cfg.TRAINING.get("early_stopping_patience", 10)),
         mode="max",
     )
 
-    num_epochs = cfg.TRAINING["num_epochs"]
+    num_epochs = int(cfg.TRAINING["num_epochs"])
     best_epoch = start_epoch
 
-    eff_batch = cfg.TRAINING["batch_size"] * grad_accum_steps
+    eff_batch = int(cfg.TRAINING["batch_size"]) * grad_accum_steps
     print(
         f"\nStarting training — model={args.model}, loss={args.loss}, "
         f"epochs={num_epochs}, device={device}, "
