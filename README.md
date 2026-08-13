@@ -161,7 +161,7 @@ The Hybrid model projects ResNet-50's `(B, 2048, 7, 7)` feature map down to `(B,
 
 ---
 
-## Reproducing results
+## Reproducing result
 
 All scripts call `config.set_seed(config.TRAINING["seed"])` at startup (default seed `42`), which seeds Python `random`, NumPy, and PyTorch (CPU + CUDA with deterministic cuDNN).  The best checkpoint is saved by validation macro AUC to `checkpoints/best.pth` and is used automatically for test evaluation at the end of `train.py`.
 
